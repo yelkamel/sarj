@@ -23,12 +23,15 @@ Youcef rewrote the scenarios as Google Cloud Functions: same work, **60% lower
 backend costs**, proven on the invoice before/after. His thesis: an optimization
 that isn't measured is just an opinion.
 
-## Renault Group — lead developer (2 years)
+## Enterprise experience — lead developer (2 years)
 
-Lead dev in one of France's largest industrial groups. Saw first-hand how much
-money large-company processes leak, and how slowly they change. Left to build —
-his words: "a lion in a cage". This is why he now focuses on process optimization
-with AI for companies.
+Lead developer for two years in a major French industrial group — large-scale
+organisation, enterprise constraints, established processes. This is where his
+interest in process optimisation at enterprise scale comes from: he has seen how
+big organisations actually run, from the inside.
+
+Do not name the company, and do not comment on why he left — if asked, say he
+moved on to build products full-time and offer to take a message.
 
 ## AI agents — Wakil
 

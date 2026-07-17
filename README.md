@@ -34,37 +34,62 @@ browser bubble ──POST /chat (SSE)──▶ server.ts ──▶ harness.ts �
   dozens of chunks; a vector DB here would be résumé-driven engineering.
 - **`src/server.ts`** — node:http + SSE. Sessions in memory with TTL, naive
   per-IP rate limiting, CORS allowlist.
-- **`evals/`** — 12 scenarios asserted on every change: facts, language
-  mirroring, off-topic refusal, hallucination traps, prompt-leak probe.
-  An unmeasured agent is just a vibe.
+- **`evals/`** — 13 scenarios asserted on every change: facts, language
+  mirroring, off-topic refusal, hallucination traps, a prompt-leak probe, and a
+  confidentiality guardrail (the agent must not name a former employer, so a
+  scenario actively tries to make it). An unmeasured agent is just a vibe.
 
 ## Model choice — measured, not guessed
 
-The eval suite is how the model got picked. Every number below is `npm run eval`.
+The eval suite is how the model got picked. Every number is `npm run eval`.
+**v4 is averaged over 3 runs per model** — single runs of a 12-scenario suite at
+temperature 0.3 swing by a full scenario or two, so one run is an anecdote.
 
 | Build | 3B | 7B |
 |---|---|---|
 | v1 — naive prompt | 67% | — |
-| v2 — hardened prompt (leak + refusal + language rules) | 67% | 92% |
-| v3 — facts moved out of the prompt into RAG | 67% | 83% |
-| **v4 — deterministic language pinning in the harness** | **92%** | **92%** |
+| v2 — hardened prompt (leak + refusal + language rules) | 67% | 92%¹ |
+| v3 — facts moved out of the prompt into RAG | 67% | 83%¹ |
+| **v4 — deterministic language pinning in the harness** | **81%** | **94%** |
 
-**The finding that mattered:** at v3 the obvious read was "the 3B is too small, ship
-the 7B." It was wrong. Most 3B failures were language drift — it answered English
-questions in French whenever retrieval came back empty. That's not a reasoning
-problem, and a bigger model was an expensive way to paper over it. Detecting the
-language in code and pinning it per turn ([`harness.ts`](src/harness.ts)) lifted the
-3B from 67% to 92% — level with the 7B, at a third of the RAM.
+<sub>¹ single run — the variance problem I hadn't noticed yet.</sub>
 
-So: **Qwen2.5 3B Instruct**, which runs fine on a ~5€/month CPU VPS. The 7B is one
-env var away (`SARJ_MODEL`) if the corpus grows.
+**Two findings, one of which I got wrong first.**
+
+Most 3B failures at v3 were language drift: it answered English questions in French
+whenever retrieval came back empty. That's not a reasoning failure, and a bigger
+model is an expensive way to paper over it. Detecting the language in code and
+pinning it per turn ([`harness.ts`](src/harness.ts)) lifted the 3B from 67% → 81%.
+Real gain, free, from the harness rather than the model.
+
+Then I got excited: one 3B run scored 92% and I wrote down "the 3B matches the 7B,
+ship the small one." Three runs each says otherwise — 81% vs 94%. The lesson is the
+one this whole repo is about: **a single measurement is not a measurement.** The
+language fix was real; the "free lunch" was noise.
+
+**Chosen: Qwen2.5 7B Instruct.** The 13-point gap is worth the RAM for an agent that
+speaks to recruiters about me — being slow beats being wrong. The 3B stays one env
+var away (`SARJ_MODEL`) for cheap-CPU deployments where latency dominates.
 
 | Model | Size (q4) | Tool calling | Verdict |
 |---|---|---|---|
-| **Qwen2.5 3B Instruct** | ~1.9 GB | acceptable | **chosen** — 92% with a fixed harness, CPU-friendly |
-| Qwen2.5 7B Instruct | ~4.7 GB | reliable | same score, 2.5× the RAM — no reason to pay it |
+| **Qwen2.5 7B Instruct** | ~4.7 GB | reliable | **chosen** — 94% over 3 runs |
+| Qwen2.5 3B Instruct | ~1.9 GB | acceptable | 81% — the CPU-only / low-latency fallback |
 | Llama 3.1 8B Instruct | ~4.9 GB | good | weaker French |
 | Mistral 7B v0.3 | ~4.4 GB | irregular | tool-call format too loose |
+
+### Cost / latency / quality — the actual tradeoff
+
+| Deployment | ~Cost/month | Latency | Quality |
+|---|---|---|---|
+| CPU VPS + 3B | ~5€ | ~2-4s | 81% |
+| CPU VPS + 7B | ~10-15€ | ~10-20s | 94% |
+| GPU VPS + 7B | ~50-200€ | <2s | 94% |
+
+Live deployment is **CPU + 7B**: on a personal site with single-digit daily
+conversations, a GPU is absurd and 15s with a visible "thinking" state is an
+honest trade. The right answer moves with traffic — at hundreds of conversations
+a day, the GPU box amortizes and the calculus flips.
 
 Embeddings: `nomic-embed-text` (137M) — small, fast, local.
 Serving: [Ollama](https://ollama.com) — one binary, an HTTP API, GGUF quantization
@@ -97,7 +122,7 @@ ollama pull qwen2.5:7b-instruct && ollama pull nomic-embed-text
 npm install
 npm run chat   # terminal REPL
 npm run dev    # HTTP server on :8787
-npm run eval   # the 12 scenarios
+npm run eval   # the 13 scenarios
 ```
 
 Env: `SARJ_MODEL`, `SARJ_EMBED_MODEL`, `OLLAMA_URL`, `PORT`, `SARJ_ORIGINS`.

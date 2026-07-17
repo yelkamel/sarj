@@ -1,0 +1,4 @@
+node_modules/
+leads.jsonl
+.env
+.DS_Store
