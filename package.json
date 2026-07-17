@@ -1,0 +1,17 @@
+{
+  "name": "sarj",
+  "version": "0.1.0",
+  "description": "Sarj (سرج) — a custom agent harness written from scratch. No agent framework, no SDK: one loop, tools, from-scratch RAG, a local LLM.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "chat": "tsx src/cli.ts",
+    "eval": "tsx evals/run.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
