@@ -9,7 +9,7 @@
 In a technical interview, I was asked to design a customer-support agent on a
 **custom harness** with a **local model** — and I answered with my deployed
 open-source stack instead. Fair flag: I had never written the harness layer
-myself. So I did, over a weekend, and put it in production on my own site.
+myself. So I did and put it in production on my own site.
 
 A harness is everything around the model that makes it an agent: conversation
 state, the tool-call loop, execution, limits, and recovery. That's ~150 lines
