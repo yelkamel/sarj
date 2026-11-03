@@ -24,6 +24,7 @@ interface Chunk {
 }
 
 let index: Chunk[] = [];
+let built = false;
 
 // --- embedding ------------------------------------------------------------
 
@@ -38,7 +39,7 @@ async function embed(text: string): Promise<number[]> {
   return json.embeddings[0];
 }
 
-function cosine(a: number[], b: number[]): number {
+export function cosine(a: number[], b: number[]): number {
   let dot = 0,
     na = 0,
     nb = 0;
@@ -47,13 +48,14 @@ function cosine(a: number[], b: number[]): number {
     na += a[i] * a[i];
     nb += b[i] * b[i];
   }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+  const norm = Math.sqrt(na) * Math.sqrt(nb);
+  return norm === 0 ? 0 : dot / norm; // a zero vector matches nothing, not NaN
 }
 
 // --- indexing -------------------------------------------------------------
 
 /** Split markdown on `## ` headings — chunks follow the author's own structure. */
-function chunkMarkdown(name: string, md: string): { source: string; text: string }[] {
+export function chunkMarkdown(name: string, md: string): { source: string; text: string }[] {
   return md
     .split(/^## /m)
     .map((part) => part.trim())
@@ -70,25 +72,27 @@ function chunkMarkdown(name: string, md: string): { source: string; text: string
 const NOT_KNOWLEDGE = new Set(["brand.md"]);
 
 /** Build the in-memory index. Called once at server boot (~seconds). */
-export async function buildIndex(): Promise<number> {
-  const files = (await readdir(KNOWLEDGE_DIR)).filter(
+export async function buildIndex(dir = KNOWLEDGE_DIR): Promise<number> {
+  const files = (await readdir(dir)).filter(
     (f) => f.endsWith(".md") && !NOT_KNOWLEDGE.has(f),
   );
   const chunks: Chunk[] = [];
   for (const file of files) {
-    const md = await readFile(join(KNOWLEDGE_DIR, file), "utf8");
+    const md = await readFile(join(dir, file), "utf8");
     for (const c of chunkMarkdown(file, md)) {
       chunks.push({ ...c, vector: await embed(c.text) });
     }
   }
   index = chunks;
+  built = true;
   return chunks.length;
 }
 
 // --- retrieval ------------------------------------------------------------
 
 export async function search(query: string, topK = 4): Promise<string> {
-  if (!index.length) throw new Error("index not built — call buildIndex() first");
+  if (!built) throw new Error("index not built — call buildIndex() first");
+  if (!index.length) return ""; // empty corpus: nothing to retrieve, and no embed call
   const qv = await embed(query);
   const scored = index
     .map((c) => ({ c, score: cosine(qv, c.vector) }))

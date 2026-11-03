@@ -112,7 +112,7 @@ async function* callModel(
 const FR_HINTS = /\b(le|la|les|est|une|des|pas|je|vous|quoi|qui|quel|quelle|comment|pourquoi|c'est|ses|son|sur|avec|pour)\b/gi;
 const EN_HINTS = /\b(the|is|are|and|of|to|for|with|his|you|what|who|which|how|why|does|has|can)\b/gi;
 
-function detectLang(text: string): "fr" | "en" {
+export function detectLang(text: string): "fr" | "en" {
   const fr = (text.match(FR_HINTS) ?? []).length;
   const en = (text.match(EN_HINTS) ?? []).length;
   return fr > en ? "fr" : "en"; // ties → English (the knowledge base's language)
@@ -133,7 +133,7 @@ const LANG_PIN: Record<"fr" | "en", string> = {
 // limits is not autonomous, it is unsupervised.
 // ---------------------------------------------------------------------------
 
-const MAX_TOOL_ROUNDS = 5;
+export const MAX_TOOL_ROUNDS = 5;
 
 export async function* runTurn(
   history: Message[],
@@ -168,6 +168,9 @@ export async function* runTurn(
       yield { type: "done", data: assistant.content };
       return;
     }
+    // Budget spent: the model got one last call to answer and asked for yet
+    // another tool. Don't run it — escalate below.
+    if (round === MAX_TOOL_ROUNDS) break;
 
     // 3. Execute each requested tool and append results to the transcript.
     for (const call of assistant.tool_calls) {

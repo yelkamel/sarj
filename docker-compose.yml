@@ -1,0 +1,43 @@
+# sarj + a local Ollama. `docker compose up -d`, then `curl localhost:8787/health`.
+# Only sarj is published, and only on loopback: Caddy (or you) sits in front.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # One-shot: pull the chat + embedding models before sarj boots (buildIndex needs embeddings).
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama: { condition: service_healthy }
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      SARJ_MODEL: ${SARJ_MODEL:-qwen2.5:7b-instruct}
+    entrypoint: ["sh", "-c", "ollama pull \"$$SARJ_MODEL\" && ollama pull nomic-embed-text"]
+    restart: "no"
+
+  sarj:
+    build: .
+    depends_on:
+      ollama-init: { condition: service_completed_successfully }
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      SARJ_MODEL: ${SARJ_MODEL:-qwen2.5:7b-instruct}
+      SARJ_ORIGINS: ${SARJ_ORIGINS:-http://localhost:4321,https://youcefelkamel.com,https://www.youcefelkamel.com}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - sarj-data:/data   # leads.jsonl survives restarts and rebuilds
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+  sarj-data:

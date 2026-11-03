@@ -16,6 +16,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { Message, runTurn, MODEL } from "./harness.js";
 import { buildIndex } from "./rag.js";
+import { clientIp, corsOrigin, createRateLimiter, createSessionStore } from "./http.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const ALLOWED_ORIGINS = (process.env.SARJ_ORIGINS ?? "http://localhost:4321,https://youcefelkamel.com,https://www.youcefelkamel.com").split(",");
@@ -28,41 +29,17 @@ const MAX_HISTORY = 40; // messages kept per session (sliding window)
 const SYSTEM_PROMPT_FILE = new URL("../knowledge/brand.md", import.meta.url).pathname;
 let systemPrompt = "";
 
-// --- sessions --------------------------------------------------------------
+// --- sessions + rate limiting (policy lives in http.ts) --------------------
 
-interface Session { history: Message[]; touched: number }
-const sessions = new Map<string, Session>();
-
-function getSession(id: string): Session {
-  const existing = sessions.get(id);
-  if (existing) { existing.touched = Date.now(); return existing; }
-  const fresh: Session = { history: [{ role: "system", content: systemPrompt }], touched: Date.now() };
-  sessions.set(id, fresh);
-  return fresh;
-}
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, s] of sessions) if (now - s.touched > SESSION_TTL_MS) sessions.delete(id);
-}, 60_000).unref();
-
-// --- rate limiting: naive token bucket per IP — enough for a personal site -
-
-const buckets = new Map<string, { count: number; reset: number }>();
-function rateLimited(ip: string): boolean {
-  const now = Date.now();
-  const b = buckets.get(ip);
-  if (!b || now > b.reset) { buckets.set(ip, { count: 1, reset: now + 60_000 }); return false; }
-  b.count++;
-  return b.count > 20; // 20 messages / min / IP
-}
+const sessions = createSessionStore(SESSION_TTL_MS, () => systemPrompt);
+setInterval(() => sessions.sweep(), 60_000).unref();
+const rateLimited = createRateLimiter(20, 60_000); // 20 messages / min / IP
 
 // --- server ----------------------------------------------------------------
 
 const server = createServer(async (req, res) => {
   const origin = req.headers.origin ?? "";
-  const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
-  res.setHeader("access-control-allow-origin", corsOrigin);
+  res.setHeader("access-control-allow-origin", corsOrigin(origin, ALLOWED_ORIGINS));
   res.setHeader("access-control-allow-headers", "content-type");
 
   if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
@@ -73,7 +50,7 @@ const server = createServer(async (req, res) => {
   }
   if (req.method !== "POST" || req.url !== "/chat") { res.writeHead(404).end(); return; }
 
-  const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "?");
+  const ip = clientIp(req.headers["x-forwarded-for"], req.socket.remoteAddress);
   if (rateLimited(ip)) { res.writeHead(429).end("slow down"); return; }
 
   // Read + validate body
@@ -102,7 +79,7 @@ const server = createServer(async (req, res) => {
   const send = (event: string, data: string) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
-  const session = getSession(sessionId);
+  const session = sessions.get(sessionId);
   // Sliding window: keep system prompt + last N messages
   if (session.history.length > MAX_HISTORY) {
     session.history = [session.history[0], ...session.history.slice(-MAX_HISTORY)];

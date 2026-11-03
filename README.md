@@ -33,7 +33,7 @@ browser bubble ──POST /chat (SSE)──▶ server.ts ──▶ harness.ts �
   local embeddings → in-memory cosine similarity. Right-sized for a corpus of
   dozens of chunks; a vector DB here would be résumé-driven engineering.
 - **`src/server.ts`** — node:http + SSE. Sessions in memory with TTL, naive
-  per-IP rate limiting, CORS allowlist.
+  per-IP rate limiting, CORS allowlist (the policy itself lives in `src/http.ts`).
 - **`evals/`** — 13 scenarios asserted on every change: facts, language
   mirroring, off-topic refusal, hallucination traps, a prompt-leak probe, and a
   confidentiality guardrail (the agent must not name a former employer, so a
@@ -121,17 +121,60 @@ a failing scenario, not by reading the code:
 ollama pull qwen2.5:7b-instruct && ollama pull nomic-embed-text
 npm install
 npm run chat   # terminal REPL
-npm run dev    # HTTP server on :8787
-npm run eval   # the 13 scenarios
+npm run dev    # HTTP server on :8787 (watch mode)
+npm run eval   # the 13 scenarios, against the real model
 ```
 
-Env: `SARJ_MODEL`, `SARJ_EMBED_MODEL`, `OLLAMA_URL`, `PORT`, `SARJ_ORIGINS`.
+Env: `SARJ_MODEL`, `SARJ_EMBED_MODEL`, `OLLAMA_URL`, `PORT`, `SARJ_ORIGINS`, `SARJ_LEADS_FILE`.
+
+## Tests
+
+Two layers, on purpose. **Evals** measure the agent's behavior and need a live model.
+**Unit tests** (Jest + ts-jest, ESM) pin down the deterministic code around it, with
+`fetch` to Ollama mocked: no model, no network, under a second.
+
+```bash
+npm test          # 57 tests
+npm run test:cov  # + coverage, fails under 80% on harness.ts / rag.ts
+```
+
+| File | What's pinned |
+|---|---|
+| `harness.ts` | language pinning (FR / EN / mixed / empty), the 5-round tool cap, 1 retry then `TOOL_ERROR`, event order `token → tool_start → tool_end → token → done` |
+| `rag.ts` | `##` chunking, cosine + top-K on fixed fake vectors, `brand.md` never indexed, empty index |
+| `tools.ts` | allowlist, `leave_message` validation + one JSONL line per lead |
+| `http.ts` | per-IP rate limit (client IP read from the proxy's entry, not a spoofable one), session TTL, CORS allowlist (pure functions pulled out of `server.ts`) |
+
+Coverage: **100% lines** on `harness.ts` and `rag.ts` (93% / 94% branches).
+Writing them caught two real bugs:
+- **Off-by-one in the loop:** it allowed **6** tool rounds, not the 5 this README promised.
+- **Rate limit bypass:** the IP was read from the *first* `X-Forwarded-For` entry, which the
+  client controls. Sending a random fake IP per request gave each one a fresh bucket. The
+  limiter now keys on the entry the proxy itself wrote.
+
+CI (`.github/workflows/ci.yml`) runs typecheck + tests + coverage on every push, then
+builds the Docker image. Evals stay manual: CI has no model.
+
+## Run with Docker
+
+```bash
+docker compose up -d        # sarj + ollama; first boot pulls the models
+curl localhost:8787/health
+```
+
+- `Dockerfile`: multi-stage (`tsc` in a build stage, the runtime ships `dist/` + prod
+  deps only), `node:22-alpine`, runs as `node` (non-root), `HEALTHCHECK` on `/health`.
+- `docker-compose.yml`: `ollama` (models in a volume), a one-shot `ollama-init` that
+  pulls `$SARJ_MODEL` + `nomic-embed-text`, then `sarj` with `OLLAMA_URL=http://ollama:11434`.
+  Leads go to the `sarj-data` volume, so they survive restarts and rebuilds.
+- Only sarj is published, on `127.0.0.1:8787`: Ollama is never exposed.
 
 ## Deploy (how the live one runs)
 
-Small VPS (CPU-only is fine with the 3B model), Ollama + `npm start` behind a
-reverse proxy for TLS. `deploy/setup-vps.sh` goes from bare Ubuntu to running
-service. Monthly cost: single-digit euros.
+Small VPS (CPU-only is fine with the 3B model): `deploy/setup-vps.sh` goes from bare
+Ubuntu to Docker Compose behind Caddy (auto-TLS on the host, proxying to the
+loopback port). It retires the old systemd install and migrates its leads.
+Monthly cost: single-digit euros.
 
 ## What I'd do with two more weeks
 

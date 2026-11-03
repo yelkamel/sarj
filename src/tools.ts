@@ -71,7 +71,8 @@ const getApps: Tool = {
 
 // --- 3. Leave a message → becomes a lead in leads.jsonl -------------------
 
-const LEADS_FILE = new URL("../leads.jsonl", import.meta.url).pathname;
+// Overridable so Docker can point it at a volume (and tests at a tmp dir).
+const leadsFile = () => process.env.SARJ_LEADS_FILE ?? new URL("../leads.jsonl", import.meta.url).pathname;
 
 const leaveMessage: Tool = {
   spec: {
@@ -92,8 +93,12 @@ const leaveMessage: Tool = {
     },
   },
   handler: async (args) => {
-    const entry = { at: new Date().toISOString(), from: String(args.from ?? "?"), message: String(args.message ?? "") };
-    await appendFile(LEADS_FILE, JSON.stringify(entry) + "\n");
+    const from = String(args.from ?? "").trim();
+    const message = String(args.message ?? "").trim();
+    // Tell the model what's missing so it asks the visitor, instead of filing an empty lead.
+    if (!from || !message) return "TOOL_ERROR: leave_message needs both `from` and `message`";
+    const entry = { at: new Date().toISOString(), from, message };
+    await appendFile(leadsFile(), JSON.stringify(entry) + "\n");
     return "Message recorded. Youcef reads these daily.";
   },
 };
